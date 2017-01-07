@@ -2339,12 +2339,20 @@ sub loadPodcastLog {
     $date       = mktime(0,0,0,$d,$m,$y);
     my $age        = ($today-$date)/86400;
     
+    # Check if file exist
+    my $exist = (-e $config_->{data_dir} . "/" . $file_name) ? 1 : 0;
+    
+    # Delete if older then max age of pc
+    my $delete = ( $exist and $age > $feeds_->{$feed_hash}->{Age} and $feeds_->{$feed_hash}->{Age} > 0) ? 1 : 0;
+    
     my $podcast = {
       name      => $file_name,
       date      => $date,
       hash      => $podcast_hash,
-      delete    => ($age > $feeds_->{$feed_hash}->{Age} and $feeds_->{$feed_hash}->{Age} > 0) ? 1 : 0 }; # Delete if older then max age of pc
-    
+      new       => 0,
+      exist     => $exist,
+      delete    => $delete};
+       
     $feeds_->{$feed_hash} = {} if( not defined( $feeds_->{$feed_hash}));
     $feeds_->{$feed_hash}->{old} = {} if( not defined( $feeds_->{$feed_hash}->{old}));
     $feeds_->{$feed_hash}->{old}->{$podcast_hash} = $podcast;
@@ -2363,6 +2371,9 @@ sub createPodcastList {
   my @PodcastsAvailable;
   
   my $first_only;
+  
+  my ($y,$m,$d) = split("-", $config_->{date});
+  my $date = mktime(0,0,0,$d,$m,$y);
   
   # Read the configuration file and fetch feeds
   foreach ( keys(%{$feeds_}))  {
@@ -2410,15 +2421,20 @@ sub createPodcastList {
       
       my @tmp = split("/", $pc->{url});
       my $file_name = pop(@tmp); # The filename of the podcast
-      
-      my $podcast = {
-        url     => $pc->{url},
-        hash    => $pc_hash,
-        name    => $file_name};
-      
+ 
       if( not exists($feed->{old}->{$pc_hash})) { 
+        my $podcast = {
+          url     => $pc->{url},
+          hash    => $pc_hash,
+          date    => $date,
+          name    => $file_name,
+          new     => 1,
+          exist   => 0,
+          delete  => 0};
+      
         if( not $match or $podcast->{url} =~ /$match/) {
           push(@{$feed->{new}}, $podcast);
+          $feed->{old}->{$pc_hash} = $podcast;
           $newP++;
         }
       }
@@ -2658,8 +2674,11 @@ sub podCatcher {
 
   # Then download the podcasts
   foreach (keys(%{$feeds_})){
+    my $test = $feeds_->{$_}->{name};
     my $Downloaded = downlodPodcasts($feeds_->{$_});
   }
+  
+  createPlaylists();
   
   my $Downloaded;
   
@@ -2674,7 +2693,89 @@ sub podCatcher {
   }
 }
 
+sub writeM3U {
+  # The name of the playlist to write
+  my $playlist = shift;
+  # Array with the files to add to the playlist
+  my $files = shift;
+  
+  open( my $FILE, '>', $playlist) or 
+    croak( "Cannot open " . $playlist . " for write\n");
+  
+  print( $FILE  join("\n", @{$files}));
+  
+  close $FILE;
+  
+  return 0; 
+}
 
+sub createPlaylists {
+  my $playlist_dir = $config_->{working_dir} . "/playlists";
+  
+  if(not -d $playlist_dir) {
+    mkdir( $playlist_dir) or croak("Unable to mkdir " . $playlist_dir . ": $!\n");
+  }
+  
+  my $playlists = {
+    all => [],
+    $config_->{date} => [],
+    new => [] };
+  
+
+  
+  my $tlist = {};
+  
+  #TODO: create playlists
+  foreach (keys(%{$feeds_})) {
+    my $feed = $feeds_->{$_};
+    foreach (keys(%{$feed->{old}})) {
+      my $podcast = $feed->{old}->{$_};
+      
+      if($podcast->{exist}){
+        my $date = $podcast->{date};
+        
+        $tlist->{$date} = [] if( not exists($tlist->{$date}));
+        
+        $podcast->{fname} = $feed->{name};
+        
+        push( @{$tlist->{$date}}, $podcast);
+      }
+    }
+  }
+  
+  my @dates = sort(keys(%{$tlist}));
+  
+  my ($y,$m,$d) = split("-", $config_->{date});
+  my $today = mktime(0,0,0,$d,$m,$y);  
+  
+  foreach my $date (@dates){
+    foreach my $podcast (@{$tlist->{$date}}){
+      my $path = "../audio_files/" . $podcast->{name};
+      
+      #<podcast>.m3u
+      $playlists->{$podcast->{fname}} = [] if(not exists($playlists->{$podcast->{fname}}));
+      push(@{$playlists->{$podcast->{fname}}}, $path);
+     
+      #all.m3u:
+      push(@{$playlists->{all}}, $path);
+      
+      #new.m3u
+      push(@{$playlists->{new}}, $path) if( $podcast->{new});
+            
+      #<date>.m3u:
+      push(@{$playlists->{$config_->{date}}}, $path) if($today == $date);
+    }
+  }
+  
+  foreach my $key ( keys(%{$playlists})) {
+    if( scalar($playlists->{$key})){
+      my $name = $playlist_dir . "/" . $key . ".m3u";
+      writeM3U( $name, $playlists->{$key});
+    }
+  }
+  
+  return 0;
+}
 
 sub fuzzyDumpExit {
   my $url = shift;
