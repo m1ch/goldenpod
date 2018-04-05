@@ -24,7 +24,7 @@ DISTFILES = AUTHORS COPYING goldenpod INSTALL Makefile NEWS README TODO goldenpo
 # Install goldenpod
 install:
 	mkdir -p "$(BINDIR)"
-	cp goldenpod "$(BINDIR)"
+	cp goldenpod.pl "$(BINDIR)/goldenpod"
 	chmod 755 "$(BINDIR)/goldenpod"
 	[ -e goldenpod.1 ] && mkdir -p "$(DATADIR)/man/man1" && cp goldenpod.1 "$(DATADIR)/man/man1" || true
 localinstall:
